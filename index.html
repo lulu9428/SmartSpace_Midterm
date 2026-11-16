@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<head>
+    <meta charset="utf-8">
+    <title>臺灣大學退學統計</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts/dist/echarts.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <link href="https://api.mapbox.com/mapbox-gl-js/v3.10.0/mapbox-gl.css" rel="stylesheet">
+    <script src="https://api.mapbox.com/mapbox-gl-js/v3.10.0/mapbox-gl.js"></script>
+    
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background-color: #f4f6f9;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            display: grid;
+            grid-template-columns: 1.2fr 1fr;
+            grid-template-rows: calc(50vh - 30px) calc(50vh - 30px);
+            gap: 20px;
+            height: 100vh;
+            box-sizing: border-box;
+        }
+
+        #mainChart {
+            grid-column: 1;
+            grid-row: span 2;
+            background: #ffffff;
+            border-radius: 16px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+            border: 1px solid #e1e8ed;
+            overflow: hidden;
+        }
+
+        .right-up-container {
+            grid-column: 2;
+            grid-row: 1;
+            display: flex;
+            gap: 15px;
+            width: 100%;
+            height: 100%;
+        }
+
+        #rightUpLeftChart {
+            flex: 1;
+            background: #ffffff;
+            border-radius: 16px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+            border: 1px solid #e1e8ed;
+            padding: 10px;
+            box-sizing: border-box;
+            min-width: 0;
+        }
+
+        #rightUpRightChart {
+            flex: 1;
+            background: #ffffff;
+            border-radius: 16px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+            border: 1px solid #e1e8ed;
+            padding: 10px;
+            box-sizing: border-box;
+            min-width: 0;
+        }
+
+        #rightDownChart {
+            grid-column: 2;
+            grid-row: 2;
+            background: #ffffff;
+            border-radius: 16px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+            border: 1px solid #e1e8ed;
+            padding: 10px;
+            box-sizing: border-box;
+        }
+    </style>
+</head>
+
+<body id="main">
+    <div id='mainChart'></div>
+    
+    <div class="right-up-container">
+        <div id='rightUpLeftChart'></div>
+        <div id='rightUpRightChart'></div>
+    </div>
+    
+    <div id='rightDownChart'></div>
+
+    <div id="contextMenu" style="display:none; position:absolute; background-color:white; border:1px solid #ccc; padding:10px; z-index:1000; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+        <p id="siteName" style="font-weight: bold; margin: 0 0 5px 0;"></p>
+        <p id="siteId" style="margin: 0 0 5px 0; color: #666;"></p>
+        <p style="margin: 0;">
+            <span id="siteCoords"></span>
+            <button id="copyCoordsBtn" style="margin-left: 5px; cursor: pointer; padding: 2px 6px;">Copy</button>
+        </p>
+    </div>
+
+    <script type="text/javascript">
+        var barChart = echarts.init(document.getElementById('rightUpLeftChart'));
+        var pieChart = echarts.init(document.getElementById('rightUpRightChart'));
+        var comparisonChart = echarts.init(document.getElementById('rightDownChart'));
+        var globalDropoutData = [];
+
+        function getMapCenter(allData){
+            let totalLongitude = 0;
+            let totalLatitude = 0;
+            const stationCount = allData.length;
+
+            for(let index = 0; index < stationCount; index++){
+                totalLongitude += allData[index]['lon'];
+                totalLatitude += allData[index]['lat'];
+            }
+            return [totalLongitude / stationCount, totalLatitude / stationCount];
+        }
+        
+        function createMap(allData) {
+            mapboxgl.accessToken = 'pk.eyJ1IjoiYmlhYm9ibyIsImEiOiJjamVvejdlNXQxZnBuMndtdWhiZHRuaTNpIn0.PIS9wtUxm_rz_IzF2WFD1g';
+            const map = new mapboxgl.Map({
+                container: 'mainChart',
+                style: 'mapbox://styles/mapbox/satellite-streets-v12',
+                center: getMapCenter(allData),
+                zoom: 7.5
+            });
+
+            map.on('style.load', () => {
+                add3DBuildings(map);
+                addSnowEffectOnMap(map);
+                add3DTerrain(map);
+            });
+
+            const contextMenu = document.getElementById('contextMenu');
+            const stationNameElement = document.getElementById('siteName');
+            const stationIdElement = document.getElementById('siteId');
+            const stationCoordinatesElement = document.getElementById('siteCoords');
+            const copyCoordinatesButton = document.getElementById('copyCoordsBtn');
+
+            document.body.addEventListener('click', () => {
+                contextMenu.style.display = 'none';
+            });
+
+            for (const station of allData) {
+                const marker = new mapboxgl.Marker({ color: '#aa0000' })
+                    .setLngLat([station.lon, station.lat])
+                    .addTo(map);
+                
+                marker.getElement().addEventListener('contextmenu', function(e){
+                    e.preventDefault();
+                    stationNameElement.textContent = "學校名稱: " + station.name;
+                    stationIdElement.textContent = "學校代碼: " + station.station;
+                    stationCoordinatesElement.textContent = "座標: " + station.lon.toFixed(2) + ", " + station.lat.toFixed(2);
+
+                    copyCoordinatesButton.onclick = () => {
+                        navigator.clipboard.writeText(station.lon + ", " + station.lat);
+                        alert('座標已複製');
+                    };
+
+                    contextMenu.style.left = e.pageX + 'px';
+                    contextMenu.style.top = e.pageY + 'px';
+                    contextMenu.style.display = 'block';
+                });
+
+                marker.getElement().addEventListener('click', function () {
+                    updateChartsForSchool(station.name);
+                });
+            }
+        }
+
+        function updateChartsForSchool(schoolName) {
+            const schoolRecords = globalDropoutData.filter(row => row["學校名稱"] === schoolName);
+            
+            if (schoolRecords.length === 0) {
+                console.warn("找不到此學校的資料：" + schoolName);
+                return;
+            }
+
+            createBarChart(schoolRecords, barChart, schoolName);
+            createPieChart(schoolRecords, pieChart, schoolName);
+            createDropoutReasonChart(schoolRecords, comparisonChart, schoolName);
+        }
+
+        function createBarChart(records, chart, schoolName) {
+            var semesters = ['105-1', '105-2', '106-1', '106-2', '107-1', '107-2'];
+            var maleCounts = [0, 0, 0, 0, 0, 0];
+            var femaleCounts = [0, 0, 0, 0, 0, 0];
+
+            records.forEach(r => {
+                let semKey = r["學年度"] + '-' + r["學期"];
+                let idx = semesters.indexOf(semKey);
+                let count = parseInt(String(r["退學人數小計"]).replace(/,/g, '')) || 0;
+                if (idx !== -1) {
+                    if (r["性別"] === '男') maleCounts[idx] += count;
+                    if (r["性別"] === '女') femaleCounts[idx] += count;
+                }
+            });
+
+            var option = {
+                title: {
+                    text: schoolName,
+                    subtext: '歷年退學比較 (長條圖)',
+                    textStyle: { color: '#2c3e50', fontSize: 10, fontWeight: 'bold', overflow: 'truncate', width: 140 },
+                    subtextStyle: { color: '#7f8c8d', fontSize: 9 },
+                    itemGap: 3,
+                    left: 5,
+                    top: 5
+                },
+                tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+                legend: { data: ['男', '女'], right: 5, top: 5, textStyle: { fontSize: 9 } },
+                grid: { top: 75, bottom: 25, left: 35, right: 10 },
+                xAxis: { type: 'category', data: semesters, axisLabel: { fontSize: 9, interval: 0 } },
+                yAxis: { type: 'value', name: '人数', nameTextStyle: { fontSize: 9 }, axisLabel: { fontSize: 9 } },
+                series: [
+                    { name: '男', type: 'bar', data: maleCounts, itemStyle: { color: '#1f77b4' } },
+                    { name: '女', type: 'bar', data: femaleCounts, itemStyle: { color: '#e377c2' } }
+                ]
+            };
+            chart.setOption(option);
+            chart.resize();
+        }
+
+        function createPieChart(records, chart, schoolName) {
+            let totalMale = 0;
+            let totalFemale = 0;
+
+            records.forEach(r => {
+                let count = parseInt(String(r["退學人數小計"]).replace(/,/g, '')) || 0;
+                if (r["性別"] === '男') totalMale += count;
+                if (r["性別"] === '女') totalFemale += count;
+            });
+
+            var option = {
+                title: {
+                    text: schoolName,
+                    subtext: '退學性別總計 (圓餅圖)',
+                    textStyle: { color: '#2c3e50', fontSize: 10, fontWeight: 'bold', overflow: 'truncate', width: 140 },
+                    subtextStyle: { color: '#7f8c8d', fontSize: 9 },
+                    itemGap: 3,
+                    left: 5,
+                    top: 5
+                },
+                tooltip: { trigger: 'item', formatter: '{b}: {c} 人 ({d}%)' },
+                legend: { show: false }, 
+                series: [
+                    {
+                        name: '退學性別',
+                        type: 'pie',
+                        radius: ['35%', '55%'],
+                        center: ['50%', '58%'],
+                        avoidLabelOverlap: true,
+
+                        label: {
+                            show: true,
+                            formatter: '{b}: {d}%',
+                            fontSize: 9,
+                            color: '#333'
+                        },
+                        labelLine: {
+                            show: true,
+                            length: 10,
+                            length2: 5
+                        },
+                        data: [
+                            { value: totalMale, name: '男', itemStyle: { color: '#1f77b4' } },
+                            { value: totalFemale, name: '女', itemStyle: { color: '#e377c2' } }
+                        ]
+                    }
+                ]
+            };
+            chart.setOption(option);
+            chart.resize();
+        }
+
+        function createDropoutReasonChart(records, chart, schoolName) {
+            var semesters = ['105-1', '105-2', '106-1', '106-2', '107-1', '107-2'];
+            var adminData = [0, 0, 0, 0, 0, 0]; 
+            var academicData = [0, 0, 0, 0, 0, 0]; 
+            var interestData = [0, 0, 0, 0, 0, 0];
+
+            records.forEach(r => {
+                let semKey = r["學年度"] + '-' + r["學期"];
+                let idx = semesters.indexOf(semKey);
+                if (idx !== -1) {
+                    let admin = (parseInt(String(r["因休學逾期未復學退學人數"]).replace(/,/g, '')) || 0) + 
+                                (parseInt(String(r["因逾期未註冊退學人數"]).replace(/,/g, '')) || 0);
+                    let academic = parseInt(String(r["因學業成績退學人數"]).replace(/,/g, '')) || 0;
+                    let interest = parseInt(String(r["因志趣不合退學人數"]).replace(/,/g, '')) || 0;
+
+                    adminData[idx] += admin;
+                    academicData[idx] += academic;
+                    interestData[idx] += interest;
+                }
+            });
+
+            const option = {
+                title: { 
+                    text: schoolName,
+                    subtext: '退學主要原因分析',
+                    left: 10, 
+                    top: 5,
+                    textStyle: { color: '#2c3e50', fontSize: 11, fontWeight: 'bold', overflow: 'truncate', width: 300 },
+                    subtextStyle: { color: '#7f8c8d', fontSize: 9 },
+                    itemGap: 2
+                },
+                tooltip: { trigger: 'axis' },
+                legend: { 
+                    data: ['行政因素', '學業成績', '志向不合'], 
+                    right: 15, 
+                    top: 5, 
+                    textStyle: { fontSize: 9 } 
+                },
+                axisPointer: { link: [{ xAxisIndex: 'all' }] },
+                dataZoom: [
+                    { show: false, realtime: true, start: 0, end: 100, xAxisIndex: [0, 1] }
+                ],
+                grid: [
+                    { left: 45, right: 20, top: 85, height: '26%' },
+                    { left: 45, right: 20, top: '62%', height: '26%' }
+                ],
+                xAxis: [
+                    { type: 'category', boundaryGap: false, data: semesters, axisLabel: { show: false } },
+                    { gridIndex: 1, type: 'category', boundaryGap: false, data: semesters, position: 'top', axisLabel: { fontSize: 9 } }
+                ],
+                yAxis: [
+                    { name: '行政', type: 'value', nameTextStyle: { fontSize: 9 }, axisLabel: { fontSize: 9 } },
+                    { gridIndex: 1, name: '學業/志向', type: 'value', inverse: true, nameTextStyle: { fontSize: 9 }, axisLabel: { fontSize: 9 } }
+                ],
+                series: [
+                    {
+                        name: '行政因素',
+                        type: 'line',
+                        symbolSize: 5,
+                        data: adminData,
+                        lineStyle: { color: '#d62728', width: 2 }
+                    },
+                    {
+                        name: '學業成績',
+                        type: 'line',
+                        xAxisIndex: 1,
+                        yAxisIndex: 1,
+                        symbolSize: 5,
+                        data: academicData,
+                        lineStyle: { color: '#ff7f0e', width: 2 }
+                    },
+                    {
+                        name: '志向不合',
+                        type: 'line',
+                        xAxisIndex: 1,
+                        yAxisIndex: 1,
+                        symbolSize: 5,
+                        data: interestData,
+                        lineStyle: { color: '#2ca02c', width: 2 }
+                    }
+                ]
+            };
+            chart.setOption(option);
+            chart.resize();
+        }
+
+        function add3DBuildings(map) {
+            const layers = map.getStyle().layers;
+            const labelLayerId = layers.find(
+                (layer) => layer.type === 'symbol' && layer.layout['text-field']
+            )?.id;
+
+            map.addLayer(
+                {
+                    'id': 'add-3d-buildings',
+                    'source': 'composite',
+                    'source-layer': 'building',
+                    'filter': ['==', 'extrude', 'true'],
+                    'type': 'fill-extrusion',
+                    'minzoom': 15,
+                    'paint': {
+                        'fill-extrusion-color': '#aaa',
+                        'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'], 15, 0, 15.05, ['get', 'height']],
+                        'fill-extrusion-base': ['interpolate', ['linear'], ['zoom'], 15, 0, 15.05, ['get', 'min_height']],
+                        'fill-extrusion-opacity': 0.6
+                    }
+                },
+                labelLayerId
+            );
+        }
+
+        function addSnowEffectOnMap(map) {
+            map.setConfigProperty('basemap', 'lightPreset', 'dusk');
+            const zoomBasedReveal = (value) => {
+                return ['interpolate', ['linear'], ['zoom'], 11, 0.0, 13, value];
+            };
+            map.setSnow({
+                density: zoomBasedReveal(0.85),
+                intensity: 1.0,
+                'center-thinning': 0.1,
+                direction: [0, 50],
+                opacity: 1.0,
+                color: `#ffffff`,
+                'flake-size': 0.71,
+                vignette: zoomBasedReveal(0.3),
+                'vignette-color': `#ffffff`
+            });
+        }
+
+        function add3DTerrain(map) {
+            map.addSource('mapbox-dem', {
+                'type': 'raster-dem',
+                'url': 'mapbox://mapbox.mapbox-terrain-dem-v1',
+                'tileSize': 512,
+                'maxzoom': 14
+            });
+            map.setTerrain({ 'source': 'mapbox-dem', 'exaggeration': 1.5 });
+        }
+
+        window.addEventListener('resize', function() {
+            barChart.resize();
+            pieChart.resize();
+            comparisonChart.resize();
+        });
+
+        Papa.parse('./data/dropout_stats.csv', {
+            download: true,
+            header: true,
+            skipEmptyLines: true,
+            complete: function(results) {
+                globalDropoutData = results.data;
+                const schoolCoordinates = {};
+                globalDropoutData.forEach(row => {
+                    if (row["學校名稱"] && row["經度"] && row["緯度"] && !schoolCoordinates[row["學校名稱"]]) {
+                        schoolCoordinates[row["學校名稱"]] = {
+                            lon: parseFloat(row["經度"]),
+                            lat: parseFloat(row["緯度"]),
+                            station: row["學校統計處代碼"]
+                        };
+                    }
+                });
+                const allData = Object.keys(schoolCoordinates).map(name => ({
+                    name: name,
+                    lon: schoolCoordinates[name].lon,
+                    lat: schoolCoordinates[name].lat,
+                    station: schoolCoordinates[name].station
+                }));
+
+                createMap(allData);
+                updateChartsForSchool("國立臺灣大學");
+            }
+        });
+    </script>
+</body>
+
+</html>
